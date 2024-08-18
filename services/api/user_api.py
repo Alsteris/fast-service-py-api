@@ -1,13 +1,22 @@
-from fastapi import APIRouter, Depends
+from fastapi import Depends, FastAPI, HTTPException, status, APIRouter, Header
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+from security import decode_access_token
+from security.auth import JWTBearer
+from jose import JWTError
+from security import token_blacklist, decode_access_token
+
 
 from app import user_crud
 from utils import RespApp, get_async_session
-from schema import account, regisAccount, regisUserDetail
+from schema import account, regisAccount, regisUserDetail, login
 
 
 
 router = APIRouter()
+
 
 @router.post("/regis-new-account")
 async def RegistNewAccount(
@@ -19,6 +28,25 @@ async def RegistNewAccount(
         return RespApp(status="02", message=f"{e}", data=None)
     
     return RespApp(status="00", message="success", data=out_resp)
+
+@router.post("/login")
+async def LoginAccount(
+    request: login,
+    db: AsyncSession = Depends(get_async_session)
+    ):
+    out_resp, e = await user_crud.login_user(request, db)
+    if e != None:
+        return RespApp(status="02", message=f"{e}", data=None)
+    
+    return RespApp(status="00", message="success", data=out_resp)
+
+@router.post("/logout")
+async def logout(token: str = Depends(JWTBearer())):
+    try:
+        token_blacklist.add(token)
+        return RespApp(status="00", message="Logout successful. Token invalidated.", data=None)
+    except Exception as e:
+        return RespApp(status="02", message=f"{e}", data=None)
 
 @router.get("/get-list-new-account")
 async def GetListNewAccount(
@@ -82,13 +110,24 @@ async def UpdateUserDetailByEmail(
 
 @router.delete("/Delete-Account")
 async def DeleteAccount(
+    token : str = Depends(JWTBearer()),
     email: str = "masukkan email akun yang akan dihapus",
     db: AsyncSession = Depends(get_async_session)
     ):
-    out_resp, e = await user_crud.Delete_Account(email, db)
-    if e != None:
-        return RespApp(status="02", message=f"{e}", data = None)
+    try:
+        access_token = decode_access_token(token)
+        if access_token["user_role"] != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Only admins can delete accounts.",
+            )
+
+        # Proceed with account deletion
+        out_resp, e = await user_crud.Delete_Account(email, db)
+        if e:
+            return RespApp(status="02", message=f"{e}", data=None)
+        
+        return RespApp(status="00", message="success", data=out_resp)
     
-    return RespApp(status="00", message="success", data=out_resp)
-
-
+    except Exception as e:
+        return RespApp(status="02", message=f"{e}", data=None)

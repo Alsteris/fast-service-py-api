@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, BigInteger, Text, DateTime, Integer, Numeric
 from datetime import datetime
 from utils import Base
+from pydantic import BaseModel
 
 
 class Users(Base):

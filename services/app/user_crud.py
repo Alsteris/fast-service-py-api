@@ -1,6 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from datastore import user_datastore
-from schema import regisAccount, regisUserDetail, regisDataTransaksi, regisBarang
+from schema import regisAccount, regisUserDetail, regisDataTransaksi, regisBarang, user_schema
+from fastapi import FastAPI, Depends, HTTPException, status
+from models import user_models
+from security import verify_password, create_access_token
+from datetime import timedelta
 
 async def create_new_account(data: regisAccount, db_session:AsyncSession):
     async with db_session as session:
@@ -13,18 +17,47 @@ async def create_new_account(data: regisAccount, db_session:AsyncSession):
         
             if data.role == "" :
                 raise Exception("role harus di isi")
+            
+            resvalidatecreateacc,e = await user_datastore.GetUserDetailByEmail(data.email, session)
+            if resvalidatecreateacc not in (None,{}):
+                raise Exception("Email sudah digunakan! silahkan masukkan email yang baru")
 
             resCreateAccount, e = await user_datastore.registNewAccount(data, session)
             if e != None:
                 raise Exception(f"{e}")
             
             await session.commit()
+            
 
             return resCreateAccount, None
 
 
         except Exception as e:
             return data, e
+        
+async def login_user(data: user_schema.login, db_session: AsyncSession):
+    async with db_session as session:
+        try:
+            # Fetch user by email
+            user, e = await user_datastore.GetUserDetailByEmail(data.email, session)
+            if user is None or not verify_password(data.password, user.password):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email or password",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # Create JWT token
+            access_token_expires = timedelta(minutes=30)
+            access_token = create_access_token(
+                data={"sub": user.email, "user_role": user.role}, expires_delta=access_token_expires
+            )
+
+            return {"access_token": access_token, "token_type": "bearer"}, None
+
+        except Exception as e:
+            return None, e
+
 
 
 async def get_list_new_account(page: int, limit:int, keyword:str, db_session:AsyncSession):
@@ -144,5 +177,7 @@ async def Delete_Account(email:str,  db_session:AsyncSession):
 
         except Exception as e:
             return None, e
+
+
 
 

@@ -1,19 +1,37 @@
 from models import user_models
+from sqlalchemy.orm import Session
+from fastapi import HTTPException
 from sqlalchemy import select, or_, and_, update, delete
 from api import user_api
+from datetime import timedelta
+from security import get_password_hash, create_access_token
 
 async def registNewAccount(data, session):
     try:
+        hashed_password = get_password_hash(data.password)
         paramsInsert = user_models.Users(
             email = data.email,
-            password= data.password,
+            password=hashed_password,
             role = data.role
         )
 
         session.add(paramsInsert)
-        return data, None
+        session.commit()
+        session.refresh(paramsInsert)
+        # Create a JWT token for the new user
+        access_token = create_access_token(
+            data={"sub": paramsInsert.email, "role": paramsInsert.role}, expires_delta=timedelta(minutes=30)
+        )
+        
+        return {"user": paramsInsert, "access_token": access_token, "token_type": "bearer"}, None
+
     except Exception as e:
-        return data, e
+        session.rollback()
+        return None, e
+    
+    
+
+
     
 async def getListNewAccount(page, limit, keyword, session):
     try:
@@ -74,7 +92,7 @@ async def getListUserDetail(page, limit, keyword, session):
 
 async def GetUserDetailByEmail(keyword, session):
     try:
-        sql = select(user_models.UsersDetail).where(user_models.UsersDetail.email == keyword)
+        sql = select(user_models.Users).where(user_models.Users.email == keyword)
         proxy_rows = await session.execute(sql)
         data = proxy_rows.scalars().first()
         
@@ -107,8 +125,8 @@ async def UpdateUserDetailByEmail(email, nomor_telepon, session):
 async def DeleteAccount(email, session) :
     try:
         sql =(
-        delete(user_models.UsersDetail)
-        .where(user_models.UsersDetail.email == email)
+        delete(user_models.Users)
+        .where(user_models.Users.email == email)
         )
         await session.execute(sql)
         await session.commit()
